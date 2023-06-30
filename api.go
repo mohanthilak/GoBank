@@ -1,0 +1,76 @@
+package main
+
+import (
+	"encoding/json"
+	"log"
+	"net/http"
+
+	"github.com/gorilla/mux"
+)
+
+type APIServer struct {
+	listenAddr string
+	store      Storage
+}
+
+func NewAPIServer(listenAddr string, s Storage) *APIServer {
+	return &APIServer{
+		listenAddr: listenAddr,
+		store:      s,
+	}
+}
+
+func (s *APIServer) Run() {
+	router := mux.NewRouter()
+	router.HandleFunc("/account", makeHTTPHandleFunc(s.handleAccount))
+	router.HandleFunc("/account/{id}", makeHTTPHandleFunc(s.handleGetAccount))
+	log.Println("JSON API serving at port:", s.listenAddr)
+	http.ListenAndServe(s.listenAddr, router)
+}
+
+func (s *APIServer) handleAccount(w http.ResponseWriter, r *http.Request) error {
+	if r.Method == "GET" {
+		return s.handleGetAccount(w, r)
+	}
+	if r.Method == "POST" {
+		return s.handleCreateAccount(w, r)
+	}
+	if r.Method == "DELETE" {
+		return s.handleDeleteAccount(w, r)
+	}
+	return nil
+}
+func (s *APIServer) handleGetAccount(w http.ResponseWriter, r *http.Request) error {
+	id := mux.Vars(r)
+	// account := NewAccount("Mohan", "Thilak")
+
+	return WriteJSON(w, http.StatusOK, id)
+}
+func (s *APIServer) handleCreateAccount(w http.ResponseWriter, r *http.Request) error {
+	return nil
+}
+func (s *APIServer) handleDeleteAccount(w http.ResponseWriter, r *http.Request) error {
+	return nil
+}
+func (s *APIServer) handleTransferAccount(w http.ResponseWriter, r *http.Request) error {
+	return nil
+}
+
+func WriteJSON(w http.ResponseWriter, status int, v any) error {
+	w.Header().Add("Content-Type", "application/json")
+	w.WriteHeader(status)
+	return json.NewEncoder(w).Encode(v)
+}
+
+type apiFunc func(http.ResponseWriter, *http.Request) error
+type ApiError struct {
+	Error string
+}
+
+func makeHTTPHandleFunc(f apiFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if err := f(w, r); err != nil {
+			WriteJSON(w, http.StatusBadRequest, ApiError{Error: err.Error()})
+		}
+	}
+}
