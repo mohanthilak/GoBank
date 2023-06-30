@@ -1,0 +1,14 @@
+POST http://localhost:8000/account
+Content-Type: application/json
+
+{
+    "firstName": "Mhahaho",
+    "lastname": "Thilak"
+}
+
+
+###
+GET http://localhost:8000/account
+
+###
+GET http://localhost:8000/account/j
