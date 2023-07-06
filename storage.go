@@ -68,9 +68,10 @@ func (s *PostgresStore) UpdateAccount(a *Account) error {
 	return nil
 }
 func (s *PostgresStore) DeleteAccount(id int) error {
-	_, err := s.db.Query("delete from account where id = $1", id)
+	_, err := s.db.Exec("delete from account where id = $1", id)
+	log.Println(id, err)
 	if err != nil {
-		return fmt.Errorf("Cound not delete account with id %d", id)
+		return fmt.Errorf("cound not delete account with id %d", id)
 	}
 	return nil
 }

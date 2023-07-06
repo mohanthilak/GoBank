@@ -5,14 +5,16 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"os"
 	"strconv"
 
+	jwt "github.com/golang-jwt/jwt/v5"
 	"github.com/gorilla/mux"
 )
 
 type APIServer struct {
-	listenAddr string
 	store      Storage
+	listenAddr string
 }
 
 func NewAPIServer(listenAddr string, store Storage) *APIServer {
@@ -25,7 +27,8 @@ func NewAPIServer(listenAddr string, store Storage) *APIServer {
 func (s *APIServer) Run() {
 	router := mux.NewRouter()
 	router.HandleFunc("/account", makeHTTPHandleFunc(s.handleAccount))
-	router.HandleFunc("/account/{id}", makeHTTPHandleFunc(s.handleGetAccountByID))
+	router.HandleFunc("/account/{id}", withJWTAuth(makeHTTPHandleFunc(s.handleGetAccountByID)))
+	router.HandleFunc("/transfer", makeHTTPHandleFunc(s.handleTransferAccount))
 	log.Println("JSON API serving at port:", s.listenAddr)
 	http.ListenAndServe(s.listenAddr, router)
 }
@@ -48,11 +51,25 @@ func (s *APIServer) handleGetAccountByID(w http.ResponseWriter, r *http.Request)
 	if err != nil {
 		return err
 	}
-	account, err := s.store.GetAccountByID(id)
-	if err != nil {
-		return err
+
+	if r.Method == "GET" {
+		account, err := s.store.GetAccountByID(id)
+		if err != nil {
+			return err
+		}
+		return WriteJSON(w, http.StatusOK, account)
 	}
-	return WriteJSON(w, http.StatusOK, account)
+
+	if r.Method == "DELETE" {
+		err = s.store.DeleteAccount(id)
+		log.Println(err)
+		if err != nil {
+			return err
+		}
+		return WriteJSON(w, http.StatusOK, map[string]int{"deleted": id})
+	}
+
+	return fmt.Errorf("method not valid %s", r.Method)
 }
 
 func (s *APIServer) handleGetAccounts(w http.ResponseWriter, r *http.Request) error {
@@ -72,6 +89,11 @@ func (s *APIServer) handleCreateAccount(w http.ResponseWriter, r *http.Request) 
 	if err := s.store.CreateAccount(account); err != nil {
 		return err
 	}
+	tokenString, err := createJWTToken(account)
+	if err != nil {
+		return err
+	}
+	log.Println(tokenString)
 	return WriteJSON(w, http.StatusOK, account)
 }
 
@@ -81,6 +103,7 @@ func (s *APIServer) handleDeleteAccount(w http.ResponseWriter, r *http.Request) 
 		return err
 	}
 	err = s.store.DeleteAccount(id)
+	log.Println(err)
 	if err != nil {
 		return err
 	}
@@ -88,7 +111,13 @@ func (s *APIServer) handleDeleteAccount(w http.ResponseWriter, r *http.Request) 
 }
 
 func (s *APIServer) handleTransferAccount(w http.ResponseWriter, r *http.Request) error {
-	return nil
+	transferReq := new(TransferRequest)
+	err := json.NewDecoder(r.Body).Decode(transferReq)
+	defer r.Body.Close()
+	if err != nil {
+		return err
+	}
+	return WriteJSON(w, http.StatusOK, transferReq)
 }
 
 func getIDFromReq(r *http.Request) (int, error) {
@@ -104,6 +133,45 @@ func WriteJSON(w http.ResponseWriter, status int, v any) error {
 	w.Header().Add("Content-Type", "application/json")
 	w.WriteHeader(status)
 	return json.NewEncoder(w).Encode(v)
+}
+
+func createJWTToken(account *Account) (string, error) {
+	// timenow := time.Now().Local().Add(time.Minute * time.Duration(15)).Unix()
+	claims := &jwt.MapClaims{
+		"expiresAt":     15000,
+		"accountNumber": account.Number,
+	}
+
+	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
+	return token.SignedString([]byte(os.Getenv("JWT_SECRET")))
+}
+
+func validateJWT(tokenString string) (*jwt.Token, error) {
+	secret := os.Getenv("JWT_SECRET")
+
+	log.Println(secret)
+	return jwt.Parse(tokenString, func(token *jwt.Token) (interface{}, error) {
+		// Don't forget to validate the alg is what you expect:
+		if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
+			return nil, fmt.Errorf("usnexpected signing method: %v", token.Header["alg"])
+		}
+
+		// hmacSampleSecret is a []byte containing your secret, e.g. []byte("my_secret_key")
+		return []byte(secret), nil
+	})
+}
+
+func withJWTAuth(handlerFunc http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		fmt.Println("Calling the JWT Auth func")
+		tokenString := r.Header.Get("x-jwt-token")
+		log.Println("tokenString: ", tokenString)
+		_, err := validateJWT(tokenString)
+		if err != nil {
+			WriteJSON(w, http.StatusForbidden, ApiError{Error: err.Error()})
+		}
+		handlerFunc(w, r)
+	}
 }
 
 type apiFunc func(http.ResponseWriter, *http.Request) error

@@ -2,7 +2,7 @@ POST http://localhost:8000/account
 Content-Type: application/json
 
 {
-    "firstName": "Mhahaho",
+    "firstName": "Mhafdsfahaho",
     "lastname": "Thilak"
 }
 
@@ -11,4 +11,12 @@ Content-Type: application/json
 GET http://localhost:8000/account
 
 ###
-GET http://localhost:8000/account/j
+GET http://localhost:8000/account/1
+
+###
+DELETE http://localhost:8000/account/10
+###
+
+GET http://localhost:8000/account/7
+x-jwt-token: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJhY2NvdW50TnVtYmVyIjoxNDExNTYsImV4cGlyZXNBdCI6MTUwMDB9.u2UFvNaFvEzCNUAZVn1DpOqfa283yRYJhsTLByM5lH0
+
