@@ -27,7 +27,7 @@ func NewAPIServer(listenAddr string, store Storage) *APIServer {
 func (s *APIServer) Run() {
 	router := mux.NewRouter()
 	router.HandleFunc("/account", makeHTTPHandleFunc(s.handleAccount))
-	router.HandleFunc("/account/{id}", withJWTAuth(makeHTTPHandleFunc(s.handleGetAccountByID)))
+	router.HandleFunc("/account/{id}", withJWTAuth(makeHTTPHandleFunc(s.handleGetAccountByID), s.store))
 	router.HandleFunc("/transfer", makeHTTPHandleFunc(s.handleTransferAccount))
 	log.Println("JSON API serving at port:", s.listenAddr)
 	http.ListenAndServe(s.listenAddr, router)
@@ -149,7 +149,7 @@ func createJWTToken(account *Account) (string, error) {
 func validateJWT(tokenString string) (*jwt.Token, error) {
 	secret := os.Getenv("JWT_SECRET")
 
-	log.Println(secret)
+	log.Println("Secret:", secret)
 	return jwt.Parse(tokenString, func(token *jwt.Token) (interface{}, error) {
 		// Don't forget to validate the alg is what you expect:
 		if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
@@ -161,15 +161,53 @@ func validateJWT(tokenString string) (*jwt.Token, error) {
 	})
 }
 
-func withJWTAuth(handlerFunc http.HandlerFunc) http.HandlerFunc {
+func permissionDenied(w http.ResponseWriter) {
+	WriteJSON(w, http.StatusForbidden, ApiError{Error: "Permission Denied"})
+}
+
+func withJWTAuth(handlerFunc http.HandlerFunc, s Storage) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		fmt.Println("Calling the JWT Auth func")
+
 		tokenString := r.Header.Get("x-jwt-token")
 		log.Println("tokenString: ", tokenString)
-		_, err := validateJWT(tokenString)
-		if err != nil {
-			WriteJSON(w, http.StatusForbidden, ApiError{Error: err.Error()})
+		if tokenString == "" {
+			permissionDenied(w)
+			return
 		}
+		token, err := validateJWT(tokenString)
+		if err != nil {
+			permissionDenied(w)
+			return
+		}
+		if !token.Valid {
+			permissionDenied(w)
+			return
+		}
+
+		userId, err := getIDFromReq(r)
+		if err != nil {
+			permissionDenied(w)
+			return
+		}
+		claims := token.Claims.(jwt.MapClaims)
+		log.Println(claims)
+
+		account, err := s.GetAccountByID(userId)
+		log.Println("account from DB: ", account, account.Number, claims["accountNumber"])
+		if err != nil {
+			permissionDenied(w)
+			return
+		}
+
+		tokenAccountNumber := claims["accountNumber"]
+		if account.Number != int64(tokenAccountNumber.(float64)) {
+			log.Println("Account Number Not Matching", int64(tokenAccountNumber.(float64)), account.Number)
+
+			permissionDenied(w)
+			return
+		}
+		log.Println("Account Number Matched")
 		handlerFunc(w, r)
 	}
 }
